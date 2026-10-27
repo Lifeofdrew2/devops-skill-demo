@@ -1,0 +1,20 @@
+# Bind to the existing Prometheus account after replacing its name/namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: demo-metrics-discovery, namespace: devops-demo}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: demo-metrics-discovery, namespace: devops-demo}
+subjects:
+  - kind: ServiceAccount
+    name: REPLACE_PROMETHEUS_SERVICE_ACCOUNT
+    namespace: REPLACE_PROMETHEUS_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: demo-metrics-discovery

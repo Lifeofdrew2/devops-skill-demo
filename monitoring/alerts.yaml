@@ -1,0 +1,20 @@
+groups:
+  - name: demo-api
+    rules:
+      - alert: DemoApiHighErrorRatio
+        expr: >-
+          (sum(rate(demo_requests_total{job="demo-api",status="503"}[5m]))
+          / clamp_min(sum(rate(demo_requests_total{job="demo-api"}[5m])), 0.001) > 0.05)
+          and (sum(rate(demo_requests_total{job="demo-api"}[5m])) > 0.1)
+        for: 2m
+        labels: {severity: warning, service: demo-api}
+        annotations:
+          summary: More than 5% of API requests failed for 2 minutes
+          runbook: docs/RUNBOOK.md
+      - alert: DemoApiNoHealthyScrapes
+        expr: sum(up{job="demo-api"}) == 0 or absent(up{job="demo-api"})
+        for: 2m
+        labels: {severity: critical, service: demo-api}
+        annotations:
+          summary: No healthy demo-api scrape targets
+          runbook: docs/RUNBOOK.md

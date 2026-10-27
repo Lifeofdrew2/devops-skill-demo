@@ -1,0 +1,57 @@
+name: validate-and-publish
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions: {contents: read}
+concurrency:
+  group: demo-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 tests/verify.py
+      - run: docker build -t demo-api:test .
+      - name: Smoke test image as non-root
+        run: |
+          docker run -d --name api -p 127.0.0.1:8080:8080 --read-only --cap-drop ALL demo-api:test
+          trap 'docker rm -f api' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          docker logs api
+          exit 1
+      - name: Validate monitoring rules
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring:/work:ro" prom/prometheus:v3.5.0 check rules /work/alerts.yaml
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and publish traceable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          IMAGE="ghcr.io/${REPOSITORY,,}:$GITHUB_SHA"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          docker build -t "$IMAGE" .
+          docker run -d --name release-api -p 127.0.0.1:8080:8080 --read-only --cap-drop ALL "$IMAGE"
+          trap 'docker rm -f release-api' EXIT
+          healthy=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ > /dev/null; then healthy=1; break; fi
+            sleep 1
+          done
+          test "$healthy" = 1
+          docker push "$IMAGE"
+          echo "Resolve the pushed image digest and promote that digest using docs/RUNBOOK.md." >> "$GITHUB_STEP_SUMMARY"
